@@ -154,6 +154,36 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 
 }
 
+
+/**
+ * FUNCTION NAME: recvCallBack
+ *
+ * DESCRIPTION: Message handler for different message types
+ */
+bool MP1Node::recvCallBack(void *env, char *data, int size ) {
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+
+    MessageHdr* msg = (MessageHdr*) data;
+    cout << "MSG_TYPE: " << msg->msgType << endl;
+
+    Address* add = (Address*)((char*)(msg) + 1);
+#ifdef DEBUGLOG
+    sprintf(s, "Received ADDR");
+    log->LOG(add, s);
+
+    sprintf(s, "At node:");
+    log->LOG(&memberNode->addr, s);
+#endif
+
+
+
+    /*
+	 * Your code goes here
+	 */
+}
+
 /**
  * FUNCTION NAME: finishUpThisNode
  *
@@ -207,17 +237,6 @@ void MP1Node::checkMessages() {
     	recvCallBack((void *)memberNode, (char *)ptr, size);
     }
     return;
-}
-
-/**
- * FUNCTION NAME: recvCallBack
- *
- * DESCRIPTION: Message handler for different message types
- */
-bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-	/*
-	 * Your code goes here
-	 */
 }
 
 /**

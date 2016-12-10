@@ -1,11 +1,3 @@
-#**********************
-#*
-#* Progam Name: MP1. Membership Protocol.
-#*
-#* Current file: Grader.sh
-#* About this file: Grading Script.
-#* 
-#***********************
 #!/bin/sh
 
 function contains () {
