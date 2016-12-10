@@ -139,6 +139,8 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
         memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
 
+        cout << "sendHB: " << memberNode->heartbeat << endl;
+
 #ifdef DEBUGLOG
         sprintf(s, "Trying to join...");
         log->LOG(&memberNode->addr, s);
@@ -161,27 +163,12 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-#ifdef DEBUGLOG
-    static char s[1024];
-#endif
-
     MessageHdr* msg = (MessageHdr*) data;
-    cout << "MSG_TYPE: " << msg->msgType << endl;
-
     Address* add = (Address*)((char*)(msg) + 1);
-#ifdef DEBUGLOG
-    sprintf(s, "Received ADDR");
-    log->LOG(add, s);
+    long* ts = (long*)((char*)(add) + 1);
 
-    sprintf(s, "At node:");
-    log->LOG(&memberNode->addr, s);
-#endif
-
-
-
-    /*
-	 * Your code goes here
-	 */
+    this->printAddress(add);
+    cout << msg->msgType << ";" << *ts << endl;
 }
 
 /**
@@ -216,7 +203,6 @@ void MP1Node::nodeLoop() {
 
     // ...then jump in and share your responsibilites!
     nodeLoopOps();
-
     return;
 }
 
