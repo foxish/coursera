@@ -14,6 +14,7 @@
 #include "Member.h"
 #include "EmulNet.h"
 #include "Queue.h"
+#include <set>
 
 /**
  * Macros
