@@ -213,6 +213,8 @@ bool MP1Node::joinReqHandler(void *env, char *data, int size) {
     this->memberNode->memberList.push_back(MemberListEntry(id, port, res->ts, memberNode->heartbeat));
     ++this->memberNode->nnb;
 
+    log->logNodeAdd(&memberNode->addr, &res->addr);
+
     // send a response message with current membership table.
     size_t msgsize = sizeof(MessageHdr) + sizeof(int) + (sizeof(MemberListEntry)*memberNode->memberList.size()) + 1;
     JoinRepMsg* msg = (JoinRepMsg*) malloc(msgsize * sizeof(char));
@@ -220,6 +222,8 @@ bool MP1Node::joinReqHandler(void *env, char *data, int size) {
     msg->len = this->memberNode->nnb;
     memcpy((char *)(msg+1), memberNode->memberList.data(), (sizeof(MemberListEntry)*memberNode->memberList.size()));
     emulNet->ENsend(&memberNode->addr, &res->addr, (char *)msg, msgsize);
+
+    return true;
 }
 
 bool MP1Node::joinRepHandler(void *env, char *data, int size) {
@@ -227,26 +231,30 @@ bool MP1Node::joinRepHandler(void *env, char *data, int size) {
     MemberListEntry* mem = (MemberListEntry*)(res + 1);
     updateNeighborList(mem, res->len);
     memberNode->inGroup = true;
+
+    return true;
 }
 
 bool MP1Node::joinGossipHandler(void *env, char *data, int size) {
     GossipMsg* res = (GossipMsg*)(data);
     MemberListEntry* mem = (MemberListEntry*)(res + 1);
     updateNeighborList(mem, res->len);
+
+    return true;
 }
 
 void MP1Node::updateNeighborList(MemberListEntry* mem, int n) {
     vector<MemberListEntry> newList;
 
     // update my own list and timestamps
-    for(int i=0; i<n; ++i){
+    for(int i=0; i<n; ++i) {
         bool found = false;
         for(int j=0; j<memberNode->memberList.size(); ++j) {
             if(memberNode->memberList[j].id == mem[i].id) {
                 // found member, update it if it has higher heartbeat
                 if(mem[i].heartbeat > memberNode->memberList[j].heartbeat) {
-                    memberNode->memberList[i].settimestamp(memberNode->heartbeat);
-                    memberNode->memberList[i].setheartbeat(mem[i].heartbeat);
+                    memberNode->memberList[j].settimestamp(memberNode->heartbeat);
+                    memberNode->memberList[j].setheartbeat(mem[i].heartbeat);
                 }
                 found = true;
                 break;
@@ -263,6 +271,12 @@ void MP1Node::updateNeighborList(MemberListEntry* mem, int n) {
     for (int i = 0; i < newList.size(); ++i) {
         memberNode->memberList.push_back(newList[i]);
         memberNode->nnb++;
+
+        Address entryAddr;
+        memset(&entryAddr, 0, sizeof(Address));
+        *(int *)(&entryAddr.addr) = newList[i].id;
+        *(short *)(&entryAddr.addr[4]) = newList[i].port;
+        log->logNodeAdd(&memberNode->addr, &entryAddr);
     }
 }
 
@@ -342,8 +356,11 @@ void MP1Node::nodeLoopOps() {
     memberNode->memberList[0].settimestamp(memberNode->heartbeat);
     memberNode->memberList[0].setheartbeat(memberNode->heartbeat);
 
+    // check any pre-fail members and remove them (for now)
+    removePreFailMembers();
+
     // pick a node at random to send out to.
-    int n = (rand() % (memberNode->memberList.size()) - 1) + 1;
+    int n = ((rand() % (memberNode->memberList.size() - 1)) + 1);
     Address sendAddr;
     memset(&sendAddr, 0, sizeof(Address));
     *(int *)(&sendAddr.addr) = memberNode->memberList[n].id;
@@ -362,6 +379,26 @@ void MP1Node::nodeLoopOps() {
     memcpy((char *)(msg+1), memberNode->memberList.data(), (sizeof(MemberListEntry)*this->memberNode->memberList.size()));
     emulNet->ENsend(&memberNode->addr, &sendAddr, (char *)msg, msgsize);
     return;
+}
+
+void MP1Node::removePreFailMembers() {
+    for (vector<MemberListEntry>::iterator it = memberNode->memberList.begin(); it != memberNode->memberList.end(); /* no increment */) {
+        if(memberNode->heartbeat - it->timestamp > TREMOVE) {
+            cout << "ENTERED;" << it->timestamp << ";" << memberNode->heartbeat << endl;
+
+            Address remAddr;
+            memset(&remAddr, 0, sizeof(Address));
+            *(int *)(&remAddr.addr) = it->id;
+            *(short *)(&remAddr.addr[4]) = it->port;
+            log->logNodeRemove(&memberNode->addr, &remAddr);
+
+            memberNode->nnb--;
+            it = memberNode->memberList.erase(it);
+
+        } else {
+            ++it;
+        }
+    }
 }
 
 /**
