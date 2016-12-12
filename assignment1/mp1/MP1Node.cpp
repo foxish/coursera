@@ -357,31 +357,38 @@ void MP1Node::nodeLoopOps() {
     memberNode->memberList[0].setheartbeat(memberNode->heartbeat);
 
     // check any pre-fail members and remove them (for now)
-    removePreFailMembers();
+    vector<MemberListEntry> gList = removePreFailMembers();
 
     // pick a node at random to send out to.
-    int n = ((rand() % (memberNode->memberList.size() - 1)) + 1);
+    int n = 0;
+    if(gList.size() > 1) {
+        n = ((rand() % (gList.size() - 1)) + 1);
+    }
+
     Address sendAddr;
     memset(&sendAddr, 0, sizeof(Address));
-    *(int *)(&sendAddr.addr) = memberNode->memberList[n].id;
-    *(short *)(&sendAddr.addr[4]) = memberNode->memberList[n].port;
+    *(int *)(&sendAddr.addr) = gList[n].id;
+    *(short *)(&sendAddr.addr[4]) = gList[n].port;
 
     int id2 = 0;
-    memcpy(&id2, &this->memberNode->memberList[n].id, sizeof(int));
+    memcpy(&id2, &gList[n].id, sizeof(int));
     cout << "Sending from: " << id << " to " << id2 << endl;
 
 
     // send it out to other nodes.
-    size_t msgsize = sizeof(MessageHdr) + sizeof(int) + (sizeof(MemberListEntry)*memberNode->memberList.size()) + 1;
+    size_t msgsize = sizeof(MessageHdr) + sizeof(int) + (sizeof(MemberListEntry)*gList.size()) + 1;
     GossipMsg* msg = (GossipMsg*) malloc(msgsize * sizeof(char));
     msg->msg.msgType = GOSSIP;
-    msg->len = this->memberNode->memberList.size();
-    memcpy((char *)(msg+1), memberNode->memberList.data(), (sizeof(MemberListEntry)*this->memberNode->memberList.size()));
+    msg->len = gList.size();
+    memcpy((char *)(msg+1), gList.data(), (sizeof(MemberListEntry)*gList.size()));
     emulNet->ENsend(&memberNode->addr, &sendAddr, (char *)msg, msgsize);
     return;
 }
 
-void MP1Node::removePreFailMembers() {
+vector<MemberListEntry> MP1Node::removePreFailMembers() {
+    vector<MemberListEntry> res;
+
+    // Find the filtered list, if they've not responded in TFAIL seconds
     for (vector<MemberListEntry>::iterator it = memberNode->memberList.begin(); it != memberNode->memberList.end(); /* no increment */) {
         if(memberNode->heartbeat - it->timestamp > TREMOVE) {
             cout << "ENTERED;" << it->timestamp << ";" << memberNode->heartbeat << endl;
@@ -394,11 +401,15 @@ void MP1Node::removePreFailMembers() {
 
             memberNode->nnb--;
             it = memberNode->memberList.erase(it);
-
+        } else if(memberNode->heartbeat - it->timestamp > TFAIL) {
+                // mark as pre-fail in set, and stop sending it out.
+            ++it;
         } else {
+            res.push_back(*it);
             ++it;
         }
     }
+    return res;
 }
 
 /**

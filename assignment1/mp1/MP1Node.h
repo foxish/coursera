@@ -76,7 +76,7 @@ private:
 	Member *memberNode;
 	char NULLADDR[6];
     int id = 0;
-    vector<MemberListEntry> preFail;
+    set<int> preFail;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -106,7 +106,7 @@ public:
 	void printAddress(Address *addr);
 
     void updateNeighborList(MemberListEntry* mem, int n);
-    void removePreFailMembers();
+    vector<MemberListEntry> removePreFailMembers();
 
 	virtual ~MP1Node();
 };
