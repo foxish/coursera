@@ -31,6 +31,7 @@
 enum MsgTypes{
     JOINREQ,
     JOINREP,
+    GOSSIP,
     DUMMYLASTMSGTYPE
 };
 
@@ -42,6 +43,25 @@ enum MsgTypes{
 typedef struct MessageHdr {
 	enum MsgTypes msgType;
 }MessageHdr;
+
+
+struct JoinReqMsg {
+    MessageHdr msg;
+    Address addr;
+    long ts;
+};
+
+struct JoinRepMsg {
+	MessageHdr msg;
+	int len;
+	// send table.
+};
+
+struct GossipMsg {
+    MessageHdr msg;
+    int len;
+    // send table.
+};
 
 /**
  * CLASS NAME: MP1Node
@@ -55,6 +75,7 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
+    int id = 0;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -70,11 +91,21 @@ public:
 	void nodeLoop();
 	void checkMessages();
 	bool recvCallBack(void *env, char *data, int size);
+
+    bool joinReqHandler(void *env, char *data, int size);
+	bool joinRepHandler(void *env, char *data, int size);
+    bool joinGossipHandler(void *env, char *data, int size);
+
 	void nodeLoopOps();
 	int isNullAddress(Address *addr);
 	Address getJoinAddress();
+    void seedMemList();
+    void updateMemList();
 	void initMemberListTable(Member *memberNode);
 	void printAddress(Address *addr);
+
+    void updateNeighborList(MemberListEntry* mem, int n);
+
 	virtual ~MP1Node();
 };
 
