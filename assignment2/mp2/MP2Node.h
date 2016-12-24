@@ -18,6 +18,7 @@
 #include "Params.h"
 #include "Message.h"
 #include "Queue.h"
+#include <cstring>
 
 /**
  * CLASS NAME: MP2Node
@@ -29,6 +30,18 @@
  * 				3) Server side CRUD APIs
  * 				4) Client side CRUD APIs
  */
+
+struct CreateMsg {
+	MessageType msgType;
+	int keyLen;
+	int valLen;
+};
+
+struct MessageHdr2 {
+	enum MessageType msgType;
+};
+
+
 class MP2Node {
 private:
 	// Vector holding the next two neighbors in the ring who have my replicas
@@ -87,6 +100,9 @@ public:
 
 	// stabilization protocol - handle multiple failures
 	void stabilizationProtocol();
+
+	// custom
+	void handleCreate(char* data, int size);
 
 	~MP2Node();
 };

@@ -44,6 +44,7 @@ void MP2Node::updateRing() {
 	/*
 	 *  Step 1. Get the current membership list from Membership Protocol / MP1
 	 */
+
 	curMemList = getMembershipList();
 
 	/*
@@ -51,12 +52,14 @@ void MP2Node::updateRing() {
 	 */
 	// Sort the list based on the hashCode
 	sort(curMemList.begin(), curMemList.end());
-
+	this->ring = curMemList;
 
 	/*
 	 * Step 3: Run the stabilization protocol IF REQUIRED
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
+
+
 }
 
 /**
@@ -108,9 +111,30 @@ size_t MP2Node::hashFunction(string key) {
  * 				3) Sends a message to the replica
  */
 void MP2Node::clientCreate(string key, string value) {
-	/*
-	 * Implement this
-	 */
+	cout << "okey: " << key << " ovalue: " << value << endl;
+	vector<Node> nodes;
+
+	const char* keyChars = key.c_str();
+	const char* valueChars = value.c_str();
+
+	// find the right members to send message to; and send.
+	size_t msgsize = sizeof(MessageType) + 2*sizeof(int) + strlen(keyChars) + 1 + (strlen(valueChars)) + 2;
+	CreateMsg* msg = (CreateMsg*) malloc(msgsize * sizeof(char));
+	msg->msgType = CREATE;
+	msg->keyLen = strlen(keyChars) + 1;
+	msg->valLen = strlen(valueChars) + 1;
+
+	char* ptr = (char *)(msg+1);
+	strcpy(ptr, keyChars);
+	ptr += strlen(keyChars) + 2;
+	strcpy(ptr, valueChars);
+
+	// find the replicas to send it to:
+	++g_transID;
+	nodes = findNodes(key);
+	for (int i=0; i<nodes.size(); ++i){
+		emulNet->ENsend(&memberNode->addr, nodes[i].getAddress(), (char *)msg, msgsize);
+	}
 }
 
 /**
@@ -171,6 +195,7 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Insert key, value, replicaType into the hash table
+	ht->create(key, value);
 }
 
 /**
@@ -252,12 +277,37 @@ void MP2Node::checkMessages() {
 		 * Handle the message types here
 		 */
 
+
+		MessageHdr2* res = (MessageHdr2*)(data);
+		switch(res->msgType) {
+			case CREATE: {
+				handleCreate(data, size);
+				break;
+			}
+			default: {
+
+			}
+		}
+
 	}
 
 	/*
 	 * This function should also ensure all READ and UPDATE operation
 	 * get QUORUM replies
 	 */
+}
+
+void MP2Node::handleCreate(char* data, int size) {
+	CreateMsg* msg = (CreateMsg*)data;
+//	printf("key: %s; ", (char*)(msg+1));
+//	printf("val: %s\n", (char*)(msg+1) + msg->keyLen + 1);
+
+	string key = (char*)(msg+1);
+	string val = (char*)(msg+1) + msg->keyLen + 1;
+	cout << "key: " << key <<  "; val: " << val << endl;
+
+	// always primary replica.
+	createKeyValue(key, val, PRIMARY);
 }
 
 /**
