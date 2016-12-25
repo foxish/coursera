@@ -19,6 +19,8 @@
 #include "Message.h"
 #include "Queue.h"
 #include <cstring>
+#include <string>
+#include <cassert>
 
 /**
  * CLASS NAME: MP2Node
@@ -33,12 +35,37 @@
 
 struct CreateMsg {
 	MessageType msgType;
+	int gtid;
 	int keyLen;
 	int valLen;
+	Address coordAddr;
 };
+
+struct DeleteMsg {
+	MessageType msgType;
+	int gtid;
+	int keyLen;
+	Address coordAddr;
+};
+
+struct ReplyMsg {
+	MessageType msgType;
+	int gtid;
+	bool success;
+};
+
+const int TRANSACTION_TIMEOUT = 5;
 
 struct MessageHdr2 {
 	enum MessageType msgType;
+};
+
+struct TransactionRecord {
+	MessageType msgType;
+	int acks;
+	int ttl;
+	string key;
+	string value;
 };
 
 
@@ -60,6 +87,8 @@ private:
 	EmulNet * emulNet;
 	// Object of Log
 	Log * log;
+	// Table holding acks to receive (tid->(num_acks,TTL))
+	map<int, TransactionRecord> coordinator;
 
 public:
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);
@@ -103,6 +132,8 @@ public:
 
 	// custom
 	void handleCreate(char* data, int size);
+	void handleReply(char* data, int size);
+	void handleDelete(char* data, int size);
 
 	~MP2Node();
 };
