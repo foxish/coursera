@@ -111,7 +111,6 @@ size_t MP2Node::hashFunction(string key) {
  * 				3) Sends a message to the replica
  */
 void MP2Node::clientCreate(string key, string value) {
-	//	cout << "okey: " << key << " ovalue: " << value << endl;
 	vector<Node> nodes;
 
 	const char* keyChars = key.c_str();
@@ -173,7 +172,6 @@ void MP2Node::clientRead(string key){
 	for (int i=0; i<nodes.size(); ++i){
 		emulNet->ENsend(&memberNode->addr, nodes[i].getAddress(), (char *)msg, msgsize);
 	}
-
 }
 
 /**
@@ -237,9 +235,6 @@ void MP2Node::clientDelete(string key){
  * 			   	2) Return true or false based on success or failure
  */
 bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
-	/*
-	 * Implement this
-	 */
 	// Insert key, value, replicaType into the hash table
 	return ht->create(key, Entry(value, par->getcurrtime(), replica).convertToString());
 }
@@ -253,11 +248,11 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
  * 			    2) Return value
  */
 string MP2Node::readKey(string key) {
-	/*
-	 * Implement this
-	 */
 	// Read key from local hash table and return value
-	return ht->read(key);
+	string internalValue = ht->read(key);
+	size_t pos = internalValue.find(":");
+	string value = internalValue.substr(0, pos);
+	return value;
 }
 
 /**
@@ -366,19 +361,23 @@ void MP2Node::handleRead(char* data, int size) {
 	ReadMsg* msg = (ReadMsg*)data;
 	string key = (char*)(msg+1);
 	string value = readKey(key);
-
 	const char* valChars = value.c_str();
 
 	size_t msgsize = sizeof(ReadReplyMsg) + strlen(valChars) + 2;
 	ReadReplyMsg* repMsg = (ReadReplyMsg*) malloc(msgsize * sizeof(char));
 	repMsg->gtid = msg->gtid;
 	repMsg->msgType = READREPLY;
-	repMsg->success = true;
+
+	if(value == "") {
+		repMsg->success = false;
+		log->logReadFail(&memberNode->addr, false, msg->gtid, key);
+	} else {
+		repMsg->success = true;
+		log->logReadSuccess(&memberNode->addr, false, msg->gtid, key, value);
+	}
 
 	char* ptr = (char *)(repMsg+1);
 	strcpy(ptr, valChars);
-
-	log->logReadSuccess(&memberNode->addr, false, msg->gtid, key, value);
 
 	// reply with an ACK for the transaction
 	emulNet->ENsend(&memberNode->addr, &msg->coordAddr, (char*)repMsg, msgsize);
@@ -409,9 +408,8 @@ void MP2Node::handleDelete(char* data, int size) {
 void MP2Node::handleCreate(char* data, int size) {
 	CreateMsg* msg = (CreateMsg*)data;
 	string key = (char*)(msg+1);
-	string val = (char*)(msg+1) + msg->keyLen + 1;
+	string val = (char*)(msg+1) + msg->keyLen;
 	int tid = msg->gtid;
-	// cout << tid << "; key: " << key <<  "; val: " << val << endl;
 
 	// always primary replica.
 	createKeyValue(key, val, PRIMARY);
@@ -439,7 +437,12 @@ void MP2Node::handleReadReply(char* data, int size) {
 		// got 2 acks, check if consistent
 		if(it->second.values.size() == 1){
 			// we are consistent and can return.
-			log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.values.begin()->first);
+			string retval = it->second.values.begin()->first;
+			if (retval != "") {
+				log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.values.begin()->first);
+			} else {
+				log->logReadFail(&memberNode->addr, true, msg->gtid, it->second.key);
+			}
 		}
 	} else if(it->second.acks < 1) {
 		// got 3 acks, check values or report failure
@@ -449,7 +452,11 @@ void MP2Node::handleReadReply(char* data, int size) {
 		} else {
 			for(auto const& ent : it->second.values) {
 				if(ent.second == 2) {
-					log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, ent.first);
+					if (ent.first != "") {
+						log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, ent.first);
+					} else {
+						log->logReadFail(&memberNode->addr, true, msg->gtid, it->second.key);
+					}
 				}
 			}
 		}
