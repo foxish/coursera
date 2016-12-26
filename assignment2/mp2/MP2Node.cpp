@@ -118,7 +118,7 @@ void MP2Node::clientCreate(string key, string value) {
 	const char* valueChars = value.c_str();
 
 	// find the right members to send message to; and send.
-	size_t msgsize = sizeof(MessageType) + 3*sizeof(int) + sizeof(Address) + strlen(keyChars) + 1 + (strlen(valueChars)) + 2;
+	size_t msgsize = sizeof(CreateMsg) + strlen(keyChars) + 1 + strlen(valueChars) + 2;
 	CreateMsg* msg = (CreateMsg*) malloc(msgsize * sizeof(char));
 	msg->msgType = CREATE;
 	msg->gtid = ++g_transID;
@@ -128,11 +128,11 @@ void MP2Node::clientCreate(string key, string value) {
 
 	char* ptr = (char *)(msg+1);
 	strcpy(ptr, keyChars);
-	ptr += strlen(keyChars) + 2;
-	strcpy(ptr, valueChars);
+	ptr += strlen(keyChars);
+	strcpy(ptr+1, valueChars);
 
 	// record the expected acks for the transaction
-	coordinator[msg->gtid] = TransactionRecord{CREATE, 2, 0, key, value};
+	coordinator[msg->gtid] = TransactionRecord{CREATE, 3, 0, key, value};
 
 	// find the replicas to send it to:
 	nodes = findNodes(key);
@@ -151,9 +151,28 @@ void MP2Node::clientCreate(string key, string value) {
  * 				3) Sends a message to the replica
  */
 void MP2Node::clientRead(string key){
-	/*
-	 * Implement this
-	 */
+	const char* keyChars = key.c_str();
+
+	// find the right members to send message to; and send.
+	size_t msgsize = sizeof(ReadMsg) + (strlen(keyChars)) + 2;
+	ReadMsg* msg = (ReadMsg*) malloc(msgsize * sizeof(char));
+	msg->msgType = READ;
+	msg->gtid = ++g_transID;
+	msg->coordAddr = memberNode->addr;
+	msg->keyLen = strlen(keyChars) + 1;
+
+	char* ptr = (char *)(msg+1);
+	strcpy(ptr, keyChars);
+
+	// record the expected acks for the transaction
+	coordinator[msg->gtid] = TransactionRecord{READ, 3, 0, key, ""};
+
+	// find the replicas to send it to
+	vector<Node> nodes;
+	nodes = findNodes(key);
+	for (int i=0; i<nodes.size(); ++i){
+		emulNet->ENsend(&memberNode->addr, nodes[i].getAddress(), (char *)msg, msgsize);
+	}
 
 }
 
@@ -199,7 +218,7 @@ void MP2Node::clientDelete(string key){
 	strcpy(ptr, keyChars);
 
 	// record the expected acks for the transaction
-	coordinator[msg->gtid] = TransactionRecord{DELETE, 2, 0, key, ""};
+	coordinator[msg->gtid] = TransactionRecord{DELETE, 3, 0, key, ""};
 
 	// find the replicas to send it to
 	vector<Node> nodes;
@@ -238,6 +257,7 @@ string MP2Node::readKey(string key) {
 	 * Implement this
 	 */
 	// Read key from local hash table and return value
+	return ht->read(key);
 }
 
 /**
@@ -269,7 +289,8 @@ bool MP2Node::deletekey(string key) {
 	 * Implement this
 	 */
 	// Delete the key from the local hash table
-	return ht->deleteKey(key);
+	bool res =  ht->deleteKey(key);
+	return res;
 }
 
 /**
@@ -316,8 +337,16 @@ void MP2Node::checkMessages() {
 				handleDelete(data, size);
 				break;
 			}
+			case READ: {
+				handleRead(data, size);
+				break;
+			}
 			case REPLY: {
 				handleReply(data, size);
+				break;
+			}
+			case READREPLY: {
+				handleReadReply(data, size);
 				break;
 			}
 			default: {
@@ -333,11 +362,31 @@ void MP2Node::checkMessages() {
 	 */
 }
 
+void MP2Node::handleRead(char* data, int size) {
+	ReadMsg* msg = (ReadMsg*)data;
+	string key = (char*)(msg+1);
+	string value = readKey(key);
+
+	const char* valChars = value.c_str();
+
+	size_t msgsize = sizeof(ReadReplyMsg) + strlen(valChars) + 2;
+	ReadReplyMsg* repMsg = (ReadReplyMsg*) malloc(msgsize * sizeof(char));
+	repMsg->gtid = msg->gtid;
+	repMsg->msgType = READREPLY;
+	repMsg->success = true;
+
+	char* ptr = (char *)(repMsg+1);
+	strcpy(ptr, valChars);
+
+	log->logReadSuccess(&memberNode->addr, false, msg->gtid, key, value);
+
+	// reply with an ACK for the transaction
+	emulNet->ENsend(&memberNode->addr, &msg->coordAddr, (char*)repMsg, msgsize);
+}
 
 void MP2Node::handleDelete(char* data, int size) {
 	DeleteMsg* msg = (DeleteMsg*)data;
 	string key = (char*)(msg+1);
-	cout << msg->gtid << "; key: " << key << endl;
 
 	size_t msgsize = sizeof(ReplyMsg) + 1;
 	ReplyMsg* repMsg = (ReplyMsg*) malloc(msgsize * sizeof(char));
@@ -378,32 +427,63 @@ void MP2Node::handleCreate(char* data, int size) {
 	emulNet->ENsend(&memberNode->addr, &msg->coordAddr, (char*)repMsg, msgsize);
 }
 
-void MP2Node::handleReply(char* data, int size) {
-	ReplyMsg* msg = (ReplyMsg*) data;
+void MP2Node::handleReadReply(char* data, int size) {
+	ReadReplyMsg* msg = (ReadReplyMsg*) data;
+	string value = (char*)(msg+1);
 	map<int, TransactionRecord>::iterator it = coordinator.find(msg->gtid);
 
 	assert(it != coordinator.end());
 	it->second.acks--;
-
-	if(it->second.acks == 0) {
-		// got 2 acks, log the right type
-		switch(it->second.msgType) {
-			case CREATE: {
-				log->logCreateSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.value);
-				break;
-			}
-			case DELETE: {
-				if(msg->success) {
-					log->logDeleteSuccess(&memberNode->addr, true, msg->gtid, it->second.key);
-				} else {
-					log->logDeleteFail(&memberNode->addr, true, msg->gtid, it->second.key);
+	it->second.values[value] += 1;
+	if(it->second.acks == 1) {
+		// got 2 acks, check if consistent
+		if(it->second.values.size() == 1){
+			// we are consistent and can return.
+			log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.values.begin()->first);
+		}
+	} else if(it->second.acks < 1) {
+		// got 3 acks, check values or report failure
+		if(it->second.values.size() == 3) {
+			// no quorum
+			log->logReadFail(&memberNode->addr, true, msg->gtid, it->second.key);
+		} else {
+			for(auto const& ent : it->second.values) {
+				if(ent.second == 2) {
+					log->logReadSuccess(&memberNode->addr, true, msg->gtid, it->second.key, ent.first);
 				}
-				break;
 			}
-
-		};
+		}
 	}
-    //	cout << "ACK for " << msg->gtid << endl;
+}
+
+void MP2Node::handleReply(char* data, int size) {
+	ReplyMsg* msg = (ReplyMsg*) data;
+	map<int, TransactionRecord>::iterator it = coordinator.find(msg->gtid);
+
+	if(it == coordinator.end()){
+		return; //transaction already completed.
+	}
+	it->second.acks--;
+	switch(it->second.msgType) {
+		case CREATE: {
+			if(it->second.acks > 1) return;
+			log->logCreateSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.value);
+			coordinator.erase(it);
+			break;
+		}
+		case DELETE: {
+			if(msg->success) {
+				if(it->second.acks > 0) return;
+				log->logDeleteSuccess(&memberNode->addr, true, msg->gtid, it->second.key);
+				coordinator.erase(it);
+			} else {
+				log->logDeleteFail(&memberNode->addr, true, msg->gtid, it->second.key);
+				coordinator.erase(it);
+			}
+			break;
+		}
+
+	};
 }
 
 /**

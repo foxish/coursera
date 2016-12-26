@@ -48,7 +48,21 @@ struct DeleteMsg {
 	Address coordAddr;
 };
 
+struct ReadMsg {
+	MessageType msgType;
+	int gtid;
+	int keyLen;
+	Address coordAddr;
+};
+
+
 struct ReplyMsg {
+	MessageType msgType;
+	int gtid;
+	bool success;
+};
+
+struct ReadReplyMsg {
 	MessageType msgType;
 	int gtid;
 	bool success;
@@ -66,6 +80,9 @@ struct TransactionRecord {
 	int ttl;
 	string key;
 	string value;
+	map<string, int> values; // received values during read
+							 // and number of instances of that value
+							 // received.
 };
 
 
@@ -132,8 +149,11 @@ public:
 
 	// custom
 	void handleCreate(char* data, int size);
-	void handleReply(char* data, int size);
+	void handleRead(char* data, int size);
+	void handleUpdate(char* data, int size);
 	void handleDelete(char* data, int size);
+	void handleReply(char* data, int size);
+	void handleReadReply(char* data, int size);
 
 	~MP2Node();
 };
