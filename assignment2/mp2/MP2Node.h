@@ -39,6 +39,7 @@ struct CreateMsg {
 	int keyLen;
 	int valLen;
 	Address coordAddr;
+	ReplicaType replicaType;
 };
 
 struct DeleteMsg {
@@ -55,7 +56,6 @@ struct ReadMsg {
 	Address coordAddr;
 };
 
-
 struct ReplyMsg {
 	MessageType msgType;
 	int gtid;
@@ -67,8 +67,6 @@ struct ReadReplyMsg {
 	int gtid;
 	bool success;
 };
-
-const int TRANSACTION_TIMEOUT = 5;
 
 struct MessageHdr2 {
 	enum MessageType msgType;
@@ -147,7 +145,7 @@ public:
 	bool deletekey(string key);
 
 	// stabilization protocol - handle multiple failures
-	void stabilizationProtocol();
+	void stabilizationProtocol(vector<Node>&);
 
 	// custom
 	void handleCreate(char* data, int size);
@@ -156,9 +154,49 @@ public:
 	void handleDelete(char* data, int size);
 	void handleReply(char* data, int size);
 	void handleReadReply(char* data, int size);
-	void reportFailedTransactions();
+	void reportFailedTransactions(vector<Node>);
+
+	vector<Node> updatePredecessors(const vector<Node>& nodeList, int pos);
+	vector<Node> updateSuccessors(const vector<Node>& nodeList, int pos);
 
 	~MP2Node();
 };
+
+
+class HashTableEntry {
+public:
+	string value;
+	int timestamp;
+	ReplicaType replica;
+	string delimiter;
+
+	HashTableEntry(string entry) {
+		vector<string> tuple;
+		this->delimiter = ":";
+		size_t pos = entry.find(delimiter);
+		size_t start = 0;
+		while (pos != string::npos) {
+			string field = entry.substr(start, pos-start);
+			tuple.push_back(field);
+			start = pos + delimiter.size();
+			pos = entry.find(delimiter, start);
+		}
+		tuple.push_back(entry.substr(start));
+
+		value = tuple.at(0);
+		timestamp = stoi(tuple.at(1));
+		replica = static_cast<ReplicaType>(stoi(tuple.at(2)));
+	}
+	HashTableEntry(string _value, int _timestamp, ReplicaType _replica) {
+		this->delimiter = ":";
+		value = _value;
+		timestamp = _timestamp;
+		replica = _replica;
+	}
+	string convertToString(){
+		return value + delimiter + to_string(timestamp) + delimiter + to_string(replica);
+	}
+};
+
 
 #endif /* MP2NODE_H_ */

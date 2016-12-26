@@ -52,6 +52,16 @@ void MP2Node::updateRing() {
 	 */
 	// Sort the list based on the hashCode
 	sort(curMemList.begin(), curMemList.end());
+	int i = 0;
+	for(Node& node : curMemList) {
+		if(*node.getAddress() == memberNode->addr) {
+			break;
+		}
+		++i;
+	}
+
+	vector<Node> newPreds = updatePredecessors(curMemList, i);
+	vector<Node> newSuccs = updateSuccessors(curMemList, i);
 	this->ring = curMemList;
 
 	/*
@@ -59,7 +69,25 @@ void MP2Node::updateRing() {
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
 	reportFailedTransactions();
+	stabilizationProtocol(newSuccs);
 
+}
+
+vector<Node> MP2Node::updatePredecessors(const vector<Node>& nodeList, int pos) {
+	vector<Node> predecessors;
+	pos += nodeList.size();
+	predecessors.push_back(nodeList.at((pos - 1) % nodeList.size()));
+	predecessors.push_back(nodeList.at((pos - 2) % nodeList.size()));
+	predecessors.push_back(nodeList.at((pos - 3) % nodeList.size()));
+	return predecessors;
+}
+
+vector<Node> MP2Node::updateSuccessors(const vector<Node>& nodeList, int pos) {
+	vector<Node> successors;
+	successors.push_back(nodeList.at((pos + 1) % nodeList.size()));
+	successors.push_back(nodeList.at((pos + 2) % nodeList.size()));
+	successors.push_back(nodeList.at((pos + 3) % nodeList.size()));
+	return successors;
 }
 
 void MP2Node::reportFailedTransactions() {
@@ -166,9 +194,14 @@ void MP2Node::clientCreate(string key, string value) {
 
 	// find the replicas to send it to:
 	nodes = findNodes(key);
-	for (int i=0; i<nodes.size(); ++i){
-		emulNet->ENsend(&memberNode->addr, nodes[i].getAddress(), (char *)msg, msgsize);
-	}
+	msg->replicaType = PRIMARY;
+	emulNet->ENsend(&memberNode->addr, nodes[0].getAddress(), (char *)msg, msgsize);
+
+	msg->replicaType = SECONDARY;
+	emulNet->ENsend(&memberNode->addr, nodes[1].getAddress(), (char *)msg, msgsize);
+
+	msg->replicaType = TERTIARY;
+	emulNet->ENsend(&memberNode->addr, nodes[2].getAddress(), (char *)msg, msgsize);
 }
 
 /**
@@ -267,7 +300,7 @@ void MP2Node::clientDelete(string key){
  */
 bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
 	// Insert key, value, replicaType into the hash table
-	return ht->create(key, Entry(value, par->getcurrtime(), replica).convertToString());
+	return ht->create(key, HashTableEntry(value, par->getcurrtime(), replica).convertToString());
 }
 
 /**
@@ -443,7 +476,7 @@ void MP2Node::handleCreate(char* data, int size) {
 	int tid = msg->gtid;
 
 	// always primary replica.
-	createKeyValue(key, val, PRIMARY);
+	createKeyValue(key, val, msg->replicaType);
 
 	// write logs
 	log->logCreateSuccess(&memberNode->addr, false, msg->gtid, key, val);
@@ -551,8 +584,8 @@ vector<Node> MP2Node::findNodes(string key) {
 				Node addr = ring.at(i);
 				if (pos <= addr.getHashCode()) {
 					addr_vec.emplace_back(addr);
-					addr_vec.emplace_back(ring.at((i+1)%ring.size()));
-					addr_vec.emplace_back(ring.at((i+2)%ring.size()));
+					addr_vec.emplace_back(ring.at((i+1) % ring.size()));
+					addr_vec.emplace_back(ring.at((i+2) % ring.size()));
 					break;
 				}
 			}
@@ -567,12 +600,12 @@ vector<Node> MP2Node::findNodes(string key) {
  * DESCRIPTION: Receive messages from EmulNet and push into the queue (mp2q)
  */
 bool MP2Node::recvLoop() {
-    if ( memberNode->bFailed ) {
-    	return false;
-    }
-    else {
-    	return emulNet->ENrecv(&(memberNode->addr), this->enqueueWrapper, NULL, 1, &(memberNode->mp2q));
-    }
+	if ( memberNode->bFailed ) {
+		return false;
+	}
+	else {
+		return emulNet->ENrecv(&(memberNode->addr), this->enqueueWrapper, NULL, 1, &(memberNode->mp2q));
+	}
 }
 
 /**
@@ -593,8 +626,16 @@ int MP2Node::enqueueWrapper(void *env, char *buff, int size) {
  *				1) Ensures that there are three "CORRECT" replicas of all the keys in spite of failures and joins
  *				Note:- "CORRECT" replicas implies that every key is replicated in its two neighboring nodes in the ring
  */
-void MP2Node::stabilizationProtocol() {
-	/*
-	 * Implement this
-	 */
+void MP2Node::stabilizationProtocol(vector<Node>& newSuccs) {
+	// check that the membership has changed from last time.
+	assert(newSuccs.size() == hasMyReplicas.size());
+	for(int i=0; i<newSuccs.size(); ++i) {
+		if(newSuccs[i] != hasMyReplicas[i]) {
+			// something has gone down and needs re-replication.
+
+		}
+	}
+
+
+
 }
