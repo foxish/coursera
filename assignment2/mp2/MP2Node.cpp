@@ -58,7 +58,38 @@ void MP2Node::updateRing() {
 	 * Step 3: Run the stabilization protocol IF REQUIRED
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
+	reportFailedTransactions();
 
+}
+
+void MP2Node::reportFailedTransactions() {
+	for (map<int, TransactionRecord>::iterator it = coordinator.begin(); it != coordinator.end(); ) {
+		const TransactionRecord& tr = it->second;
+		if (par->getcurrtime() - tr.timestamp > 25) {
+			// coordinator fails the transaction.
+			switch(tr.msgType) {
+				case CREATE: {
+					log->logCreateFail(&memberNode->addr, true, it->first, tr.key, tr.value);
+					break;
+				}
+				case READ: {
+					log->logReadFail(&memberNode->addr, true, it->first, tr.key);
+					break;
+				}
+				case UPDATE: {
+					log->logUpdateFail(&memberNode->addr, true, it->first, tr.key, tr.value);
+					break;
+				}
+				case DELETE: {
+					log->logDeleteFail(&memberNode->addr, true, it->first, tr.key);
+					break;
+				}
+			}
+			coordinator.erase(it++);
+		} else {
+			it++;
+		}
+	}
 
 }
 
@@ -131,7 +162,7 @@ void MP2Node::clientCreate(string key, string value) {
 	strcpy(ptr+1, valueChars);
 
 	// record the expected acks for the transaction
-	coordinator[msg->gtid] = TransactionRecord{CREATE, 3, 0, key, value};
+	coordinator[msg->gtid] = TransactionRecord{CREATE, 3, 0, key, value, par->getcurrtime()};
 
 	// find the replicas to send it to:
 	nodes = findNodes(key);
@@ -164,7 +195,7 @@ void MP2Node::clientRead(string key){
 	strcpy(ptr, keyChars);
 
 	// record the expected acks for the transaction
-	coordinator[msg->gtid] = TransactionRecord{READ, 3, 0, key, ""};
+	coordinator[msg->gtid] = TransactionRecord{READ, 3, 0, key, "", par->getcurrtime()};
 
 	// find the replicas to send it to
 	vector<Node> nodes;
@@ -216,7 +247,7 @@ void MP2Node::clientDelete(string key){
 	strcpy(ptr, keyChars);
 
 	// record the expected acks for the transaction
-	coordinator[msg->gtid] = TransactionRecord{DELETE, 3, 0, key, ""};
+	coordinator[msg->gtid] = TransactionRecord{DELETE, 3, 0, key, "", par->getcurrtime()};
 
 	// find the replicas to send it to
 	vector<Node> nodes;
@@ -430,7 +461,10 @@ void MP2Node::handleReadReply(char* data, int size) {
 	string value = (char*)(msg+1);
 	map<int, TransactionRecord>::iterator it = coordinator.find(msg->gtid);
 
-	assert(it != coordinator.end());
+	if(it == coordinator.end()){
+		return;
+	}
+
 	it->second.acks--;
 	it->second.values[value] += 1;
 	if(it->second.acks == 1) {
@@ -443,6 +477,7 @@ void MP2Node::handleReadReply(char* data, int size) {
 			} else {
 				log->logReadFail(&memberNode->addr, true, msg->gtid, it->second.key);
 			}
+			coordinator.erase(it);
 		}
 	} else if(it->second.acks < 1) {
 		// got 3 acks, check values or report failure
@@ -457,6 +492,7 @@ void MP2Node::handleReadReply(char* data, int size) {
 					} else {
 						log->logReadFail(&memberNode->addr, true, msg->gtid, it->second.key);
 					}
+					coordinator.erase(it);
 				}
 			}
 		}

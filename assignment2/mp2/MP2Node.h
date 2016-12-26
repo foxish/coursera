@@ -80,9 +80,11 @@ struct TransactionRecord {
 	int ttl;
 	string key;
 	string value;
+	int timestamp;
 	map<string, int> values; // received values during read
 							 // and number of instances of that value
 							 // received.
+
 };
 
 
@@ -154,6 +156,7 @@ public:
 	void handleDelete(char* data, int size);
 	void handleReply(char* data, int size);
 	void handleReadReply(char* data, int size);
+	void reportFailedTransactions();
 
 	~MP2Node();
 };
