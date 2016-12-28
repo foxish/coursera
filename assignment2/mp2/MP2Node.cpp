@@ -246,9 +246,38 @@ void MP2Node::clientRead(string key){
  * 				3) Sends a message to the replica
  */
 void MP2Node::clientUpdate(string key, string value){
-	/*
-	 * Implement this
-	 */
+	vector<Node> nodes;
+
+	const char* keyChars = key.c_str();
+	const char* valueChars = value.c_str();
+
+	// find the right members to send message to; and send.
+	size_t msgsize = sizeof(CreateMsg) + strlen(keyChars) + 1 + strlen(valueChars) + 2;
+	CreateMsg* msg = (CreateMsg*) malloc(msgsize * sizeof(char));
+	msg->msgType = UPDATE;
+	msg->gtid = ++g_transID;
+	msg->coordAddr = memberNode->addr;
+	msg->keyLen = strlen(keyChars) + 1;
+	msg->valLen = strlen(valueChars) + 1;
+
+	char* ptr = (char *)(msg+1);
+	strcpy(ptr, keyChars);
+	ptr += strlen(keyChars);
+	strcpy(ptr+1, valueChars);
+
+	// record the expected acks for the transaction
+	coordinator[msg->gtid] = TransactionRecord{UPDATE, 3, 0, key, value, par->getcurrtime()};
+
+	// find the replicas to send it to:
+	nodes = findNodes(key);
+	msg->replicaType = PRIMARY;
+	emulNet->ENsend(&memberNode->addr, nodes[0].getAddress(), (char *)msg, msgsize);
+
+	msg->replicaType = SECONDARY;
+	emulNet->ENsend(&memberNode->addr, nodes[1].getAddress(), (char *)msg, msgsize);
+
+	msg->replicaType = TERTIARY;
+	emulNet->ENsend(&memberNode->addr, nodes[2].getAddress(), (char *)msg, msgsize);
 }
 
 /**
@@ -338,7 +367,7 @@ bool MP2Node::updateKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Update key in local hash table and return true or false
-
+	return ht->update(key, HashTableEntry(value, par->getcurrtime(), replica).convertToString());
 }
 
 /**
@@ -398,6 +427,10 @@ void MP2Node::checkMessages() {
 				handleCreate(data, size);
 				break;
 			}
+			case UPDATE: {
+				handleUpdate(data, size);
+				break;
+			}
 			case DELETE: {
 				handleDelete(data, size);
 				break;
@@ -431,12 +464,33 @@ void MP2Node::checkMessages() {
 	 */
 }
 
+void MP2Node::handleUpdate(char* data, int size) {
+	CreateMsg* msg = (CreateMsg*)data;
+	string key = (char*)(msg+1);
+	string val = (char*)(msg+1) + msg->keyLen;
+	int tid = msg->gtid;
+
+	// always primary replica.
+	if(updateKeyValue(key, val, msg->replicaType)){
+		log->logUpdateSuccess(&memberNode->addr, false, msg->gtid, key, val);
+	} else {
+		log->logUpdateFail(&memberNode->addr, false, msg->gtid, key, val);
+		return;
+	}
+
+	// reply with an ACK for the transaction
+	size_t msgsize = sizeof(ReplyMsg) + 1;
+	ReplyMsg* repMsg = (ReplyMsg*) malloc(msgsize * sizeof(char));
+	repMsg->gtid = msg->gtid;
+	repMsg->msgType = REPLY;
+	emulNet->ENsend(&memberNode->addr, &msg->coordAddr, (char*)repMsg, msgsize);
+}
+
 void MP2Node::handleStabilize(char* data, int size) {
 	StabilizeMsg* msg = (StabilizeMsg*)data;
 	string key = (char*)(msg+1);
 	string val = (char*)(msg+1) + msg->keyLen;
 
-	// always primary replica.
 	createKeyValue(key, val, msg->replicaType);
 }
 
@@ -566,6 +620,12 @@ void MP2Node::handleReply(char* data, int size) {
 			coordinator.erase(it);
 			break;
 		}
+		case UPDATE: {
+			if(it->second.acks > 1) return;
+			log->logUpdateSuccess(&memberNode->addr, true, msg->gtid, it->second.key, it->second.value);
+			coordinator.erase(it);
+			break;
+		}
 		case DELETE: {
 			if(msg->success) {
 				if(it->second.acks > 0) return;
@@ -577,6 +637,7 @@ void MP2Node::handleReply(char* data, int size) {
 			}
 			break;
 		}
+
 
 	};
 }
