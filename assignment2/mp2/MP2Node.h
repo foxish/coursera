@@ -33,12 +33,23 @@
  * 				4) Client side CRUD APIs
  */
 
+enum SpecialMessageType {
+	STABILIZE = 10
+};
+
 struct CreateMsg {
 	MessageType msgType;
 	int gtid;
 	int keyLen;
 	int valLen;
 	Address coordAddr;
+	ReplicaType replicaType;
+};
+
+struct StabilizeMsg {
+	SpecialMessageType msgType;
+	int keyLen;
+	int valLen;
 	ReplicaType replicaType;
 };
 
@@ -84,11 +95,6 @@ struct TransactionRecord {
 							 // received.
 
 };
-
-enum SpecialMessageType {
-	STABILIZE = 10
-};
-
 
 class MP2Node {
 private:
@@ -158,10 +164,17 @@ public:
 	void handleDelete(char* data, int size);
 	void handleReply(char* data, int size);
 	void handleReadReply(char* data, int size);
+	void handleStabilize(char* data, int size);
+
 	void reportFailedTransactions();
 
 	vector<Node> updatePredecessors(const vector<Node>& nodeList, int pos);
 	vector<Node> updateSuccessors(const vector<Node>& nodeList, int pos);
+
+	string getAddressString(Address* addr);
+	void printLocalRing(vector<Node>, vector<Node>);
+	void replicateKeys(ReplicaType, ReplicaType, Node&);
+	ReplicaType getReplicaType(string key);
 
 	~MP2Node();
 };

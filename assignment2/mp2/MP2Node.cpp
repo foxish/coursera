@@ -317,6 +317,14 @@ string MP2Node::readKey(string key) {
 	return value;
 }
 
+ReplicaType MP2Node::getReplicaType(string key) {
+	string internalValue = ht->read(key);
+	size_t pos = internalValue.rfind(":");
+	string value = internalValue.substr(pos+1);
+//	cout << "FOUND VAL: " << value << endl;
+	return (ReplicaType) atoi(value.c_str());
+}
+
 /**
  * FUNCTION NAME: updateKeyValue
  *
@@ -406,6 +414,10 @@ void MP2Node::checkMessages() {
 				handleReadReply(data, size);
 				break;
 			}
+			case STABILIZE: {
+				handleStabilize(data, size);
+				break;
+			}
 			default: {
 
 			}
@@ -417,6 +429,15 @@ void MP2Node::checkMessages() {
 	 * This function should also ensure all READ and UPDATE operation
 	 * get QUORUM replies
 	 */
+}
+
+void MP2Node::handleStabilize(char* data, int size) {
+	StabilizeMsg* msg = (StabilizeMsg*)data;
+	string key = (char*)(msg+1);
+	string val = (char*)(msg+1) + msg->keyLen;
+
+	// always primary replica.
+	createKeyValue(key, val, msg->replicaType);
 }
 
 void MP2Node::handleRead(char* data, int size) {
@@ -625,16 +646,37 @@ int MP2Node::enqueueWrapper(void *env, char *buff, int size) {
  *				Note:- "CORRECT" replicas implies that every key is replicated in its two neighboring nodes in the ring
  */
 void MP2Node::stabilizationProtocol(vector<Node>& newPreds, vector<Node>& newSuccs) {
+	// True only at the beginning.
+	if (hasMyReplicas.size() == 0 && haveReplicasOf.size() == 0){
+		hasMyReplicas = newSuccs;
+		haveReplicasOf = newPreds;
+		return;
+	}
+
+	if (hasMyReplicas[1].getHashCode() == newSuccs[0].getHashCode()) {
+		// this means that my secondary has died.
+
+		cout << getAddressString(&memberNode->addr) << " SECONDARY DEAD" << endl;
+		printLocalRing(haveReplicasOf, hasMyReplicas);
+		printLocalRing(newPreds, newSuccs);
+
+		// Time to replicate my keys to new secondary/tertiarys, whoever you are.
+		replicateKeys(PRIMARY, SECONDARY, newSuccs[0]);
+		replicateKeys(PRIMARY, TERTIARY, newSuccs[1]);
+	} else if(hasMyReplicas[1].getHashCode() != newSuccs[1].getHashCode()) {
+		// this means that my tertiary has died.
+
+		cout << getAddressString(&memberNode->addr) << " TERTIARY DEAD" << endl;
+		printLocalRing(haveReplicasOf, hasMyReplicas);
+		printLocalRing(newPreds, newSuccs);
+
+		replicateKeys(PRIMARY, TERTIARY, newSuccs[1]);
+	}
+
+
 	// check that the membership has changed from last time.
 	// if the member just behind me has fallen, I am now primary for his keys.
-	for(int i=0; i<newPreds.size(); ++i) {
-		cout << newPreds[i].getHashCode() << " ";
-	}
-	cout << "[" << Node(memberNode->addr).getHashCode() << "] ";
-	for(int i=0; i<newSuccs.size(); ++i) {
-		cout << newSuccs[i].getHashCode() << " ";
-	}
-	cout << endl;
+
 
 	// if the member ahead is dead, need to re-replicate
 
@@ -649,4 +691,54 @@ void MP2Node::stabilizationProtocol(vector<Node>& newPreds, vector<Node>& newSuc
 
 	hasMyReplicas = newSuccs;
 	haveReplicasOf = newPreds;
+}
+
+void MP2Node::printLocalRing(vector<Node> newPreds, vector<Node> newSuccs){
+	for (int i = 0; i < newPreds.size(); ++i) {
+		cout << getAddressString(newPreds[i].getAddress()) << " ";
+	}
+	cout << "[" << getAddressString(Node(memberNode->addr).getAddress()) << "] ";
+	for (int i = 0; i < newSuccs.size(); ++i) {
+		cout << getAddressString(newSuccs[i].getAddress()) << " ";
+	}
+	cout << endl;
+}
+
+void MP2Node::replicateKeys(ReplicaType srcType, ReplicaType destType, Node& destination) {
+	cout << "Replicating " << srcType+1 << "-ary keys as " << destType+1
+		 << "-ary keys from " << getAddressString(&memberNode->addr)
+		 << " to " << getAddressString(destination.getAddress()) << endl;
+
+	for(const auto& ent : ht->hashTable) {
+		if (getReplicaType(ent.first) != srcType) {
+			continue;
+		}
+
+		const char* keyChars = ent.first.c_str();
+		const char* valueChars = readKey(ent.first).c_str();
+
+		// find the right members to send message to; and send.
+		size_t msgsize = sizeof(StabilizeMsg) + strlen(keyChars) + 1 + strlen(valueChars) + 2;
+		StabilizeMsg* msg = (StabilizeMsg*) malloc(msgsize * sizeof(char));
+		msg->msgType = STABILIZE;
+		msg->keyLen = strlen(keyChars) + 1;
+		msg->valLen = strlen(valueChars) + 1;
+		msg->replicaType = destType;
+
+		char* ptr = (char *)(msg+1);
+		strcpy(ptr, keyChars);
+		ptr += strlen(keyChars);
+		strcpy(ptr+1, valueChars);
+
+		// find the replicas to send it to:
+		emulNet->ENsend(&memberNode->addr, destination.getAddress(), (char *)msg, msgsize);
+	}
+}
+
+
+string MP2Node::getAddressString(Address* addr) {
+	char buffer[50];
+	sprintf(buffer, "%d.%d.%d.%d:%d",  addr->addr[0],addr->addr[1],addr->addr[2],
+		   addr->addr[3], *(short*)&addr->addr[4]);
+	return buffer;
 }
