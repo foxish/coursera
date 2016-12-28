@@ -85,6 +85,10 @@ struct TransactionRecord {
 
 };
 
+enum SpecialMessageType {
+	STABILIZE = 10
+};
+
 
 class MP2Node {
 private:
@@ -145,7 +149,7 @@ public:
 	bool deletekey(string key);
 
 	// stabilization protocol - handle multiple failures
-	void stabilizationProtocol(vector<Node>&);
+	void stabilizationProtocol(vector<Node>&, vector<Node>&);
 
 	// custom
 	void handleCreate(char* data, int size);
@@ -154,7 +158,7 @@ public:
 	void handleDelete(char* data, int size);
 	void handleReply(char* data, int size);
 	void handleReadReply(char* data, int size);
-	void reportFailedTransactions(vector<Node>);
+	void reportFailedTransactions();
 
 	vector<Node> updatePredecessors(const vector<Node>& nodeList, int pos);
 	vector<Node> updateSuccessors(const vector<Node>& nodeList, int pos);
@@ -167,6 +171,7 @@ class HashTableEntry {
 public:
 	string value;
 	int timestamp;
+	Address primary;
 	ReplicaType replica;
 	string delimiter;
 
@@ -193,6 +198,15 @@ public:
 		timestamp = _timestamp;
 		replica = _replica;
 	}
+
+	HashTableEntry(string _value, int _timestamp, ReplicaType _replica, Address _primary) {
+		this->delimiter = ":";
+		value = _value;
+		timestamp = _timestamp;
+		replica = _replica;
+		primary = _primary;
+	}
+
 	string convertToString(){
 		return value + delimiter + to_string(timestamp) + delimiter + to_string(replica);
 	}

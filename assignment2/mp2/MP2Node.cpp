@@ -69,16 +69,15 @@ void MP2Node::updateRing() {
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
 	reportFailedTransactions();
-	stabilizationProtocol(newSuccs);
+	stabilizationProtocol(newPreds, newSuccs);
 
 }
 
 vector<Node> MP2Node::updatePredecessors(const vector<Node>& nodeList, int pos) {
 	vector<Node> predecessors;
 	pos += nodeList.size();
-	predecessors.push_back(nodeList.at((pos - 1) % nodeList.size()));
 	predecessors.push_back(nodeList.at((pos - 2) % nodeList.size()));
-	predecessors.push_back(nodeList.at((pos - 3) % nodeList.size()));
+	predecessors.push_back(nodeList.at((pos - 1) % nodeList.size()));
 	return predecessors;
 }
 
@@ -86,7 +85,6 @@ vector<Node> MP2Node::updateSuccessors(const vector<Node>& nodeList, int pos) {
 	vector<Node> successors;
 	successors.push_back(nodeList.at((pos + 1) % nodeList.size()));
 	successors.push_back(nodeList.at((pos + 2) % nodeList.size()));
-	successors.push_back(nodeList.at((pos + 3) % nodeList.size()));
 	return successors;
 }
 
@@ -626,16 +624,29 @@ int MP2Node::enqueueWrapper(void *env, char *buff, int size) {
  *				1) Ensures that there are three "CORRECT" replicas of all the keys in spite of failures and joins
  *				Note:- "CORRECT" replicas implies that every key is replicated in its two neighboring nodes in the ring
  */
-void MP2Node::stabilizationProtocol(vector<Node>& newSuccs) {
+void MP2Node::stabilizationProtocol(vector<Node>& newPreds, vector<Node>& newSuccs) {
 	// check that the membership has changed from last time.
-	assert(newSuccs.size() == hasMyReplicas.size());
-	for(int i=0; i<newSuccs.size(); ++i) {
-		if(newSuccs[i] != hasMyReplicas[i]) {
-			// something has gone down and needs re-replication.
-
-		}
+	// if the member just behind me has fallen, I am now primary for his keys.
+	for(int i=0; i<newPreds.size(); ++i) {
+		cout << newPreds[i].getHashCode() << " ";
 	}
+	cout << "[" << Node(memberNode->addr).getHashCode() << "] ";
+	for(int i=0; i<newSuccs.size(); ++i) {
+		cout << newSuccs[i].getHashCode() << " ";
+	}
+	cout << endl;
+
+	// if the member ahead is dead, need to re-replicate
 
 
 
+//	for(int i=0; i<newSuccs.size(); ++i) {
+//		if(newSuccs[i] != hasMyReplicas[i]) {
+//			// something has gone down and needs re-replication.
+//
+//		}
+//	}
+
+	hasMyReplicas = newSuccs;
+	haveReplicasOf = newPreds;
 }
